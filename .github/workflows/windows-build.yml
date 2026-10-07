@@ -10,6 +10,7 @@ on:
       - 'requirements*.txt'
       - '*說明.txt'
       - 'Windows快速開始.txt'
+      - 'LICENSE'
       - '.github/workflows/windows-build.yml'
   workflow_dispatch:
 

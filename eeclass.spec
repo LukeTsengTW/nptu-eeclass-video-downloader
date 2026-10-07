@@ -15,6 +15,7 @@ hiddenimports += se_hidden
 if not any(Path(source).name == 'selenium-manager.exe' for source, _ in datas + binaries):
     raise RuntimeError('Selenium Manager Windows executable was not collected')
 datas += [(str(root / 'build' / 'third_party_licenses'), 'third_party_licenses')]
+datas += [(str(root / 'LICENSE'), '.')]
 a = Analysis([str(root / 'eeclass_entry.py')], pathex=[str(root)], binaries=binaries,
              datas=datas, hiddenimports=hiddenimports, hookspath=[], runtime_hooks=[], excludes=[])
 pyz = PYZ(a.pure)

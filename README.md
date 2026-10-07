@@ -6,7 +6,7 @@ Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影
 
 ## Windows 一般使用者
 
-下載 [v1.7.0 Windows 免安裝版](https://github.com/LukeTsengTW/nptu-eeclass-video-downloader/releases/tag/v1.7.0) 的 `eeClass-v1.7.0-Windows-x64.zip`，解壓縮後雙擊 `eeClass-Downloader.exe`。壓縮包包含 EXE、快速說明、第三方授權與 SHA-256 校驗碼，共 4 個檔案。私人 repository 需要先登入有存取權限的 GitHub 帳號。
+下載 [v1.7.0 Windows 免安裝版](https://github.com/LukeTsengTW/nptu-eeclass-video-downloader/releases/tag/v1.7.0) 的 `eeClass-v1.7.0-Windows-x64.zip`，解壓縮後雙擊 `eeClass-Downloader.exe`。壓縮包包含 EXE、快速說明、第三方授權與 SHA-256 校驗碼，共 4 個檔案。
 
 **不必安裝 Python、pip、Selenium、yt-dlp 或 FFmpeg。** 若電腦已有可用 Firefox 就直接使用；沒有時才下載並重用專用瀏覽器。支援 Windows 10／11 x64，不要求系統管理員權限。首次瀏覽器準備需要網路。
 
@@ -93,7 +93,7 @@ py -3.13 -m venv .venv-build
 .\.venv-build\Scripts\python.exe scripts/smoke_windows.py dist/eeClass-Windows-x64/eeClass-Downloader.exe
 ```
 
-成品位於 `dist/eeClass-Windows-x64`。GitHub Actions 在 Windows runner 上自動執行同一流程，測試成功後才上傳成品，保留 90 天。原始碼 ZIP 不包含已編譯 EXE，請下載 Actions 成品。
+成品位於 `dist/eeClass-Windows-x64`。GitHub Actions 在 Windows runner 上自動執行同一流程，測試成功後才上傳成品，保留 90 天。原始碼 ZIP 不包含已編譯 EXE；一般使用者請下載上方 Release，開發者可使用 Actions 成品。
 
 使用 PyInstaller console bootloader 的 `hide-early` 模式，雙擊時隱藏主控台，同時保留背景程序需要的標準輸入／輸出；少數電腦啟動時可能短暫閃現主控台。背景瀏覽器與 yt-dlp 由同一 EXE 的內部工作模式執行，不會遞迴開啟 GUI。
 
@@ -104,4 +104,8 @@ py -3.13 -m venv .venv-build
 - [Selenium 4.50.0](https://pypi.org/project/selenium/4.50.0/)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 
-本專案尚未指定開源授權。
+## 授權
+
+本專案原創程式碼與文件採用 [MIT License](LICENSE)，Copyright (c) 2026 LukeTsengTW。允許使用、修改、散布與商業使用，散布時須保留著作權與授權聲明；軟體不提供任何擔保。
+
+Python、Selenium、yt-dlp、PyInstaller 與其他第三方元件仍依各自授權條款使用，相關聲明隨建置成品提供。MIT 授權不涵蓋課程影片、學校標誌或其他第三方內容。本工具由社群開發，非國立屏東大學官方軟體。

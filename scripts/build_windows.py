@@ -45,6 +45,7 @@ def build():
     package.mkdir(parents=True, exist_ok=True)
     exe = ROOT / 'dist' / 'eeClass-Downloader.exe'
     shutil.copyfile(exe, package / exe.name)
+    shutil.copyfile(ROOT / 'LICENSE', package / 'LICENSE.txt')
     shutil.copyfile(ROOT / 'Windows快速開始.txt', package / 'Windows快速開始.txt')
     shutil.copyfile(ROOT / '使用說明.txt', package / '使用說明.txt')
     shutil.copytree(notices, package / 'third_party_licenses', dirs_exist_ok=True)
