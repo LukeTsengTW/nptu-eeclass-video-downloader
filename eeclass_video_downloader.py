@@ -1716,6 +1716,15 @@ def entry_point(args=None):
         subprocess.run([str(manager), "--version"], stdin=subprocess.DEVNULL,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
                        timeout=30, **quiet_process_kwargs())
+        if getattr(sys, "frozen", False):
+            # Validate workers launched FROM the frozen parent, sharing its unpacked runtime.
+            subprocess.run(browser_worker_command(lambda _: None), input='{"op":"quit"}\n',
+                           text=True, encoding="utf-8", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           check=True, timeout=60, **quiet_process_kwargs())
+            nested = subprocess.run([*find_ytdlp(), "--version"], stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    check=True, timeout=60, **quiet_process_kwargs())
+            assert nested.stdout.decode("utf-8").strip() == yt_version
         app = EeclassDownloaderApp()
         try:
             app.withdraw()

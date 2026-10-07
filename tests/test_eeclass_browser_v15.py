@@ -166,7 +166,7 @@ class BrowserSetupTests(unittest.TestCase):
     def test_version_sort_is_numeric(self):
         old = self.browser(self.shared, '99.0')
         new = self.browser(self.shared, '150.0')
-        self.assertEqual([str(p) for p in m.cached_firefoxes(self.shared)], [new, old])
+        self.assertEqual([str(p.resolve()) for p in m.cached_firefoxes(self.shared)], [new, old])
 
     def test_invalid_download_is_not_marked_ready(self):
         self.manager.binary_paths.return_value = {'browser_path': str(self.root / 'missing'), 'driver_path': ''}

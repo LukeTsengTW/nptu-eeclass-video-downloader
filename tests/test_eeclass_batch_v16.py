@@ -285,7 +285,7 @@ class BatchFlowTests(unittest.TestCase):
         self.start()
         self.app.output_var.set(str(Path(self.temp.name) / 'other'))
         self.complete()
-        self.assertTrue(all(item[1].parent == Path(self.temp.name) for item in self.downloads))
+        self.assertTrue(all(item[1].parent.resolve() == Path(self.temp.name).resolve() for item in self.downloads))
 
 
 if __name__ == '__main__': unittest.main()
