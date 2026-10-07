@@ -1,0 +1,3 @@
+# Selenium 4.50.0 is installed by the application into its isolated runtime.
+# Install this dependency in the Python environment used to launch the GUI.
+yt-dlp

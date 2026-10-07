@@ -1,0 +1,7 @@
+* text=auto
+*.py text eol=lf
+*.pyw text eol=lf
+*.md text eol=lf
+*.bat text eol=crlf
+# The Windows VBS launcher is UTF-16 with BOM; preserve its exact bytes.
+*.vbs -text
