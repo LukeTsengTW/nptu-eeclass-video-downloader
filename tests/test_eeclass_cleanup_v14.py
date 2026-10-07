@@ -38,7 +38,7 @@ class CleanupTests(unittest.TestCase):
   service=types.ModuleType('selenium.webdriver.firefox.service');service.Service=Mock
   fake_socket=Mock();fake_socket.__enter__=Mock(return_value=fake_socket);fake_socket.__exit__=Mock(return_value=False);fake_socket.getsockname.return_value=('127.0.0.1',2828)
   import socket
-  with tempfile.TemporaryDirectory() as td,patch.dict(sys.modules,{'selenium':selenium,'selenium.webdriver.firefox.options':options,'selenium.webdriver.firefox.service':service}),patch.object(m,'firefox_executable',return_value='fixture-firefox'),patch.object(m,'automation_directory',return_value=Path(td)),patch.object(m,'resolve_in_browser',return_value={'type':'cancelled','quit':True}),patch.object(socket,'socket',return_value=fake_socket),patch.object(sys,'stdin',io.StringIO(json.dumps({'op':'resolve','url':URL})+'\n')),patch.object(sys,'stdout',io.StringIO()):
+  with tempfile.TemporaryDirectory() as td,patch.dict(sys.modules,{'selenium':selenium,'selenium.webdriver.firefox.options':options,'selenium.webdriver.firefox.service':service}),patch.object(m,'prepare_firefox',return_value=('fixture-firefox','fixture-geckodriver')),patch.object(m,'automation_directory',return_value=Path(td)),patch.object(m,'resolve_in_browser',return_value={'type':'cancelled','quit':True}),patch.object(socket,'socket',return_value=fake_socket),patch.object(sys,'stdin',io.StringIO(json.dumps({'op':'resolve','url':URL})+'\n')),patch.object(sys,'stdout',io.StringIO()):
    m.browser_worker_main()
   driver.quit.assert_called_once()
 if __name__=='__main__':unittest.main(verbosity=2)

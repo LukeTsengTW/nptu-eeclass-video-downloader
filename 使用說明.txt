@@ -1,4 +1,4 @@
-﻿eeClass 影片下載器 1.4 — 自動瀏覽器版
+﻿eeClass 影片下載器 1.5 — 自動下載與重用瀏覽器版
 
 平常使用
 1. 雙擊「開啟_eeClass影片下載器.vbs」。
@@ -16,15 +16,23 @@
 • 專用設定檔會保留；登入能否跨次開啟繼續使用，仍由 eeClass 的登入期限與 Cookie 規則決定。過期時重新登入即可。
 • 程式不代填密碼、不處理驗證碼，也不儲存密碼。Firefox 設定檔會保留一般瀏覽資料與網站登入狀態。
 
+瀏覽器重用規則
+• 先找已安裝且可執行的 Firefox，再找上次使用的副本及既有 Selenium 快取，都找不到才自動下載。
+• 新下載的瀏覽器放在 %LOCALAPPDATA%\NPTUeeClassDownloader\browser-cache，同一個 Windows 使用者帳號共用，不隨程式資料夾位置而重複下載。
+• 瀏覽器與驅動程式驗證成功後才記錄完成；正常重開直接使用原有元件，不會每次解析都另下載一套新版。
+• 系統瀏覽器更新、元件被刪除或損壞時會重新檢查。下載失敗可重試，已下載成功的瀏覽器會重用。
+• 同時開啟兩份下載器時會依序設定，避免重複下載；實際操作仍請一次只使用一份下載器，以免瀏覽器設定檔衝突。
+• 只清理程式自己 browser-cache 內無法通過執行檢查的 Firefox 副本，不刪除系統 Firefox 或其他程式的快取。
+
 環境需求
-• Windows、已安裝 Firefox、Python 3.10 以上（含 Tcl/Tk、venv、pip），以及原先已安裝的 yt-dlp。
+• Windows、Python 3.10 以上（含 Tcl/Tk、venv、pip），以及原先已安裝的 yt-dlp。
 • 本版仍是 Python GUI，尚未打包成免 Python 的 EXE。
-• 不需要另外安裝瀏覽器擴充套件。
-• 首次需能連線到 PyPI 及 Mozilla geckodriver 的下載來源。若校網限制下載，可換可用網路後重試。
+• 不必預先安裝 Firefox，也不需要瀏覽器擴充套件。
+• 首次需能連線到 PyPI、Mozilla Firefox 與 geckodriver 的下載來源。若校網限制下載，可換可用網路後重試。
 • 自動化套件放在使用者 LOCALAPPDATA 下的 NPTUeeClassDownloader 目錄，不變更其他專案的 Python 套件。
 
 操作與限制
-• 等待登入時可按「取消解析」；首次套件安裝期間與下載 MP4 期間尚無取消按鈕。
+• 等待登入時可按「取消解析」；首次套件與瀏覽器準備不會立即取消；下載 MP4 期間尚無取消按鈕。
 • 若已關閉專用 Firefox，可再次按解析開啟。
 • 建議由下載器的關閉按鈕結束；程式會一併關閉自己開啟的 Firefox。
 • 選擇資料夾、複製 MP4 連結、複製紀錄、自訂檔名與下載進度仍保留。
@@ -35,13 +43,13 @@
 下載與登入資料
 優先從真正的 Firefox 影片頁面讀取原本的 media Base64 JSON，失敗時才讀取 HTML5 video 的實際來源。下載仍使用 yt-dlp + Referer。
 自動模式會把該 Firefox 視窗目前的 eeClass Cookie 暫時提供給 yt-dlp；這是避免讀到過期磁碟 Cookie 的必要調整。暫存 Cookie 檔案會在正常完成或發生下載錯誤後刪除，Cookie 值不顯示於介面或診斷紀錄。若作業系統強制終止程式，暫存資料可能來不及清除。
-手動 HTML 匯入仍使用原有 Firefox 設定檔的 Cookie；兩種模式會分開使用各自的登入來源。
+沒有自行安裝 Firefox 的使用者請使用自動解析。手動 HTML 匯入仍使用原有 Firefox 設定檔的 Cookie；兩種模式會分開使用各自的登入來源。
 
 已完成的驗證
 • Python 語法與 Python 3.10 語法相容檢查。
-• 49 項離線測試通過，包含先前解析／TLS／Cookie 功能、模擬瀏覽器登入與取消、同一影片與網域檢查、即時 Cookie 匯出、下載成功及失敗時的暫存清理。
-• 瀏覽器流程使用測試替身；尚未在使用者 Windows 上完成 Selenium／Firefox 啟動、GUI 畫面及 eeClass 真實登入下載驗證。
-• 使用者已確認 1.3 的手動 HTML 匯入流程可成功下載；這不等於 1.4 自動模式已經完成實機驗證。
+• 64 項離線測試通過，新增首次下載、已安裝優先、重開重用、失敗重試、快取修復與設定鎖；包含先前解析／TLS／Cookie 功能、模擬瀏覽器登入與取消、同一影片與網域檢查、即時 Cookie 匯出、下載成功及失敗時的暫存清理。
+• 瀏覽器流程使用測試替身；尚未在使用者 Windows 上完成瀏覽器實際下載、Selenium／Firefox 啟動、GUI 畫面及 eeClass 真實登入下載驗證。
+• 使用者已確認 1.3 的手動 HTML 匯入流程可成功下載；這不等於 1.5 自動模式已經完成實機驗證。
 
 技術參考
 https://www.selenium.dev/documentation/selenium_manager/

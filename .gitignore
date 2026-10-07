@@ -27,3 +27,7 @@ cookies.sqlite*
 downloads/
 .DS_Store
 Thumbs.db
+browser-cache/
+browser-assets.json
+browser-assets.tmp
+setup.lock

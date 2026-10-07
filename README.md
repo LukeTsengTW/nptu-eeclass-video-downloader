@@ -2,11 +2,11 @@
 
 Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影片下載為 MP4。貼上影片頁面網址後，由專用 Firefox 讀取播放器資料並提供畫質選擇。
 
-目前版本：**1.4，自動瀏覽器版**。本專案提供影片下載，尚未提供格式轉換或重新編碼。
+目前版本：**1.5，自動下載與重用瀏覽器版**。本專案提供影片下載，尚未提供格式轉換或重新編碼。
 
 ## 使用方式
 
-1. 安裝 Python 3.10 以上（包含 Tcl/Tk、pip、venv）及 Firefox。
+1. 安裝 Python 3.10 以上（包含 Tcl/Tk、pip、venv）。不必預先安裝 Firefox。
 2. 安裝 yt-dlp，或保留原先可用的 yt-dlp 安裝。使用相同 Python 環境安裝的指令為：
 
    ```powershell
@@ -22,15 +22,25 @@ Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影
 
 ## 自動化元件與資料位置
 
-首次解析會在 `%LOCALAPPDATA%\NPTUeeClassDownloader` 建立獨立 Python 環境，安裝固定版本 `selenium==4.50.0`；Selenium Manager 負責取得 geckodriver。首次使用需要可連線至 PyPI 及驅動程式下載來源。
+首次解析會在 `%LOCALAPPDATA%\NPTUeeClassDownloader` 建立獨立 Python 環境，安裝固定版本 `selenium==4.50.0`；Selenium Manager 負責取得缺少的 Firefox 與 geckodriver。首次使用需要可連線至 PyPI、Mozilla 的瀏覽器下載來源及 geckodriver 下載來源。
+
+瀏覽器依下列順序選擇：
+
+1. 電腦已安裝、可執行的 Firefox。
+2. 上次使用的可用副本，以及程式或 Selenium 已下載的 Firefox 快取。
+3. 都找不到時，才下載專用 Firefox 至 `%LOCALAPPDATA%\NPTUeeClassDownloader\browser-cache`，不進行系統安裝。
+
+同一個 Windows 使用者帳號下，移動或重新下載本專案仍共用上述目錄，不會每個專案資料夾各存一份瀏覽器。正常重開會直接使用已驗證的瀏覽器與驅動程式，不會每次解析都另下載一套新版。系統 Firefox 更新、元件被刪除或快取損壞時，會重新檢查需要的元件。若兩個下載器同時進行首次設定，後啟動的程式會等待並重用結果；同一個瀏覽器設定檔仍應一次只由一份下載器使用。
+
+既有 Selenium 快取預設為 `%USERPROFILE%\.cache\selenium`，若設定 `SE_CACHE_PATH` 則使用該路徑。程式只清理自身 `browser-cache` 中無法通過執行檢查的 Firefox 版本目錄，不刪除系統 Firefox 或其他程式的快取；Selenium Manager 的快取維護則依其本身規則運作。瀏覽器與驅動程式通過執行檢查後才寫入 `browser-assets.json`，下載失敗不會留下「設定完成」標記。
 
 同一目錄下的 `firefox-profile` 保存專用瀏覽器的設定與網站登入狀態。程式不代填密碼，也不將 Cookie 值寫入診斷紀錄。下載時會暫時提供目前 eeClass Cookie 給 yt-dlp，完成或出錯後清除暫存檔；若程序遭作業系統強制終止，暫存檔可能來不及清除。
 
 ## 備用方式與限制
 
-- 「匯入 HTML（備用）」保留已成功使用的手動流程，完整操作見 [使用說明](使用說明.txt)。
+- 「匯入 HTML（備用）」保留已成功使用的手動流程，此方式仍需要原有 Firefox 設定檔中的登入 Cookie；沒有自行安裝 Firefox 的使用者請使用自動解析。詳見 [使用說明](使用說明.txt)。
 - 僅支援 NPTU eeClass HTTPS 上、帳號已可觀看的普通 MP4；不處理 DRM、批次下載或影片重新編碼。
-- 等待登入期間可取消解析；首次套件安裝與 MP4 下載期間尚無取消按鈕。
+- 等待登入期間可取消解析；首次套件與瀏覽器準備不會立即取消；MP4 下載期間尚無取消按鈕。
 - 關閉下載器時會結束它開啟的專用 Firefox；目前操作需先完成或取消。
 
 ## 開發與驗證
@@ -45,7 +55,7 @@ py -3 -m unittest discover -s tests -p "test_eeclass*.py"
 
 其他系統可使用 `python` 取代 `py -3` 執行測試。測試涵蓋解析、TLS 相容處理、Cookie、模擬登入與取消、頁面範圍檢查，以及下載完成／失敗後的暫存清理。測試使用合成資料與瀏覽器替身，不需要學校帳號。
 
-目前 49 項離線測試通過。使用者已確認 1.3 的手動 HTML 匯入能成功下載；**1.4 的 Windows GUI、Selenium／Firefox 啟動及真實 eeClass 登入下載仍待實機驗證**。
+目前 64 項離線測試通過，包含首次下載、既有瀏覽器優先、重開重用、元件遺失、失敗重試、快取修復及設定鎖。使用者已確認 1.3 的手動 HTML 匯入能成功下載；**1.5 的 Windows GUI、瀏覽器實際下載、Selenium／Firefox 啟動及真實 eeClass 登入下載仍待實機驗證**。
 
 回報問題時請附版本、Windows／Python／Firefox 版本與「複製紀錄」內容。請勿上傳登入 Cookie、瀏覽器設定檔或含私人資料的完整 HTML。
 

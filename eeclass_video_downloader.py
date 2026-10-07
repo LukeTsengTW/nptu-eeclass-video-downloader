@@ -9,7 +9,7 @@ eeClass Video Downloader (NPTU)
 3. 優先解析 media Base64 JSON，列出並預選最高畫質。
 4. 使用該 Firefox 視窗的即時 Cookie、Referer 與 yt-dlp 下載 MP4。
 
-環境：Windows、Python 3.10+（含 Tk / venv / pip）、Firefox、yt-dlp。
+環境：Windows、Python 3.10+（含 Tk / venv / pip）、yt-dlp；Firefox 可自動下載。
 首次自動建立隔離環境並安裝 Selenium 4.50.0；驅動程式由 Selenium Manager 取得。
 僅下載使用者已取得觀看權限的普通 MP4，不處理 DRM。
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import configparser
+from contextlib import contextmanager
 from html.parser import HTMLParser
 from http.cookiejar import Cookie, CookieJar, DefaultCookiePolicy
 import html as html_lib
@@ -44,7 +45,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 
-APP_TITLE = "NPTU eeClass 影片下載器 · 1.4"
+APP_TITLE = "NPTU eeClass 影片下載器 · 1.5"
 EECLASS_HOST = "eeclass.nptu.edu.tw"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) "
@@ -554,7 +555,50 @@ def quiet_process_kwargs():
     return {"creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0}
 
 
+@contextmanager
+def setup_lock(report, timeout=600):
+    """OS lock is released even if setup crashes; the file itself is reusable."""
+    root = automation_directory()
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "setup.lock").open("a+b") as handle:
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"0")
+            handle.flush()
+        deadline = time.monotonic() + timeout
+        waiting = False
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("另一個下載器仍在設定瀏覽器，請等候完成後再試。")
+                if not waiting:
+                    report("另一個下載器正在設定，等候完成後共用元件…")
+                    waiting = True
+                time.sleep(0.25)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def automation_python(report):
+    with setup_lock(report):
+        return _automation_python(report)
+
+
+def _automation_python(report):
     """Install into a private venv, leaving the user's Python packages untouched."""
     root = automation_directory()
     runtime = root / f"runtime-{sys.version_info.major}.{sys.version_info.minor}"
@@ -607,6 +651,126 @@ def firefox_executable():
     elif sys.platform == "darwin":
         candidates.append("/Applications/Firefox.app/Contents/MacOS/firefox")
     return next((value for value in candidates if value and Path(value).is_file()), None)
+
+
+def selenium_cache_directory():
+    # Reuse Selenium's existing assets, including drivers downloaded by v1.4.
+    return Path(os.environ.get("SE_CACHE_PATH") or (Path.home() / ".cache" / "selenium")).expanduser().resolve()
+
+
+def executable_version(path, product):
+    if not path or not Path(path).is_file():
+        return None
+    try:
+        result = subprocess.run([str(path), "--version"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15,
+            **quiet_process_kwargs())
+        text = result.stdout.decode("utf-8", errors="replace")
+        match = re.search(re.escape(product) + r"\s+(\d+(?:\.\d+)+)", text, re.I)
+        return match.group(1) if result.returncode == 0 and match else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def cached_firefoxes(cache):
+    suffix = "firefox.exe" if os.name == "nt" else (
+        "Firefox.app/Contents/MacOS/firefox" if sys.platform == "darwin" else "firefox")
+    # Bounded search of the known Selenium layout; never scan the user's drive.
+    paths = list((cache / "firefox").glob("*/*/" + suffix))
+    def version_key(path):
+        relative = path.relative_to(cache / "firefox")
+        return tuple(int(n) for n in re.findall(r"\d+", relative.parts[1]))
+    return sorted(paths, key=version_key, reverse=True)
+
+
+def asset_signature(path):
+    info = Path(path).stat()
+    return [info.st_size, info.st_mtime_ns]
+
+
+def prepare_firefox(report):
+    """Reuse installed/cached Firefox before allowing a browser download."""
+    from selenium.webdriver.common.selenium_manager import SeleniumManager
+    with setup_lock(report):
+        shared_cache = selenium_cache_directory()
+        owned_cache = automation_directory() / "browser-cache"
+        state_file = automation_directory() / "browser-assets.json"
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            if not isinstance(state, dict):
+                state = {}
+        except (OSError, ValueError):
+            state = {}
+        installed = firefox_executable()
+        candidates = [installed, state.get("browser_path"),
+                      *cached_firefoxes(owned_cache), *cached_firefoxes(shared_cache)]
+        browser = version = None
+        for candidate in candidates:
+            if isinstance(candidate, (str, Path)):
+                version = executable_version(candidate, "Firefox")
+                if version:
+                    browser = str(Path(candidate).resolve())
+                    break
+        if browser:
+            report("使用電腦已安裝的 Firefox…" if installed and Path(installed).resolve() == Path(browser)
+                   else "重用已下載的專用 Firefox，不重新下載…")
+            driver = state.get("driver_path")
+            try:
+                if (state.get("browser_path") == browser and
+                    state.get("browser_signature") == asset_signature(browser) and
+                    isinstance(driver, str) and
+                    state.get("driver_signature") == asset_signature(driver) and
+                    executable_version(driver, "geckodriver")):
+                    return browser, driver
+            except OSError:
+                pass
+        else:
+            report("首次設定：找不到可用 Firefox，正在下載專用瀏覽器（之後會重用）…")
+            # Repair incomplete extractions only inside this application's cache.
+            # Never delete system installations or another application's shared cache.
+            for candidate in cached_firefoxes(owned_cache):
+                relative = candidate.relative_to(owned_cache / "firefox")
+                version_dir = owned_cache / "firefox" / relative.parts[0] / relative.parts[1]
+                if version_dir.resolve().is_relative_to(owned_cache.resolve()) and not version_dir.is_symlink():
+                    shutil.rmtree(version_dir)
+        cache = owned_cache
+        args = ["--browser", "firefox", "--cache-path", str(cache), "--avoid-stats", "--timeout", "300"]
+        if browser:
+            args += ["--browser-path", browser, "--browser-version", version, "--avoid-browser-download"]
+        manager = SeleniumManager()
+        result = None
+        if browser:
+            # Check both caches for a usable driver before permitting a download.
+            for existing_cache in dict.fromkeys([owned_cache, shared_cache]):
+                offline_args = list(args)
+                offline_args[offline_args.index("--cache-path") + 1] = str(existing_cache)
+                try:
+                    candidate_result = manager.binary_paths([*offline_args, "--offline"])
+                    if executable_version(candidate_result.get("driver_path"), "geckodriver"):
+                        result = candidate_result
+                        break
+                except Exception:
+                    continue
+        if result is None:
+            try:
+                result = manager.binary_paths(args)
+            except Exception as error:
+                raise RuntimeError("瀏覽器元件準備失敗。請確認網路與磁碟空間後重新解析；已完成的下載會重用。"
+                                   f"（{type(error).__name__}）") from error
+        browser = browser or result.get("browser_path")
+        driver = result.get("driver_path")
+        if not executable_version(browser, "Firefox") or not executable_version(driver, "geckodriver"):
+            raise RuntimeError("瀏覽器或驅動程式驗證失敗，尚未記錄為設定完成。請重試，或安裝 Firefox 後再解析。")
+        browser, driver = str(Path(browser).resolve()), str(Path(driver).resolve())
+        state = {"browser_path": browser, "driver_path": driver,
+                 "browser_signature": asset_signature(browser), "driver_signature": asset_signature(driver)}
+        temporary = state_file.with_suffix(".tmp")
+        try:
+            temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(state_file)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return browser, driver
 
 
 def media_snapshot(driver, requested_url):
@@ -748,10 +912,9 @@ def browser_worker_main():
                             pass
                         driver = None
                 if driver is None:
-                    executable = firefox_executable()
-                    if not executable:
-                        raise RuntimeError("找不到 Firefox，請先安裝 Firefox 再按解析。")
-                    emit({"type": "status", "text": "正在開啟專用 Firefox；首次可能需要下載驅動程式…"})
+                    executable, driver_path = prepare_firefox(
+                        lambda text: emit({"type": "status", "text": text}))
+                    emit({"type": "status", "text": "瀏覽器元件已就緒，正在開啟專用 Firefox…"})
                     profile = automation_directory() / "firefox-profile"
                     profile.mkdir(parents=True, exist_ok=True)
                     options = Options()
@@ -766,7 +929,7 @@ def browser_worker_main():
                     with socket.socket() as sock:
                         sock.bind(("127.0.0.1", 0))
                         port = sock.getsockname()[1]
-                    service = Service(service_args=["--marionette-port", str(port)],
+                    service = Service(executable_path=driver_path, service_args=["--marionette-port", str(port)],
                         log_output=subprocess.DEVNULL,
                         popen_kw={"creation_flags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0})
                     driver = webdriver.Firefox(options=options, service=service)
@@ -1091,7 +1254,7 @@ class EeclassDownloaderApp(tk.Tk):
                 if len(candidates) > 1:
                     raise RuntimeError("已找到影片，但有多個 Firefox 設定檔可供下載。請先用「解析影片」確認正確設定檔，再提供紀錄以設定下載來源。")
                 profile = candidates[0][1]
-                self.msg_queue.put(("log", f"[匯入 v1.4] 從本機 HTML 找到 {len(sources)} 種畫質；Firefox 設定檔：{profile.name}"))
+                self.msg_queue.put(("log", f"[匯入 v1.5] 從本機 HTML 找到 {len(sources)} 種畫質；Firefox 設定檔：{profile.name}"))
                 self.msg_queue.put(("resolved", (sources, url, profile, title)))
             except Exception as e:
                 self.msg_queue.put(("error", str(e)))
@@ -1121,7 +1284,7 @@ class EeclassDownloaderApp(tk.Tk):
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
         self.browser_resolving = True
-        self._write_log("[自動解析 v1.4] " + url)
+        self._write_log("[自動解析 v1.5] " + url)
         def worker():
             try:
                 self.start_browser_worker()
