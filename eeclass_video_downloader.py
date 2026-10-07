@@ -45,7 +45,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 
-APP_TITLE = "NPTU eeClass 影片下載器 · 1.5"
+APP_TITLE = "NPTU eeClass 影片下載器 · 1.6"
 EECLASS_HOST = "eeclass.nptu.edu.tw"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) "
@@ -543,6 +543,37 @@ def display_title(sources, page, url):
     return "eeclass_" + (urllib.parse.urlparse(url).path.rstrip("/").split("/")[-1] or "video")
 
 
+def collect_video_urls(values):
+    """Keep row numbers for validation; only the first row is required."""
+    if not values or not values[0].strip():
+        raise ValueError("第一個網址欄位為必填，請先輸入影片網址。")
+    urls = []
+    for row, value in enumerate(values, 1):
+        url = value.strip()
+        if not url:
+            continue
+        if not is_eeclass_https(url):
+            raise ValueError(f"第 {row} 個網址格式不正確，請輸入 https://eeclass.nptu.edu.tw/ 的影片頁面網址。")
+        urls.append(url)
+    return urls
+
+
+def download_output_path(out_dir, title, source):
+    title = title.strip()
+    if title.lower().endswith(".mp4"):
+        title = title[:-4]
+    title = sanitize_filename(title)[:150].rstrip(" .") or "eeclass_video"
+    if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", title, re.I):
+        title = "_" + title
+    quality = f"_{source['width']}x{source['height']}" if source.get("width") and source.get("height") else ""
+    output_path = out_dir / f"{title}{quality}.mp4"
+    counter = 2
+    while any(Path(str(output_path) + suffix).exists() for suffix in ("", ".part", ".ytdl")):
+        output_path = out_dir / f"{title}{quality} ({counter}).mp4"
+        counter += 1
+    return output_path
+
+
 SELENIUM_VERSION = "4.50.0"
 
 
@@ -876,8 +907,10 @@ def browser_worker_main():
     from selenium.webdriver.firefox.options import Options
     from selenium.webdriver.firefox.service import Service
     commands = queue.Queue()
+    request_id = None
 
     def emit(value):
+        value = {**value, "request_id": request_id}
         sys.stdout.write(json.dumps(value, ensure_ascii=True) + "\n")
         sys.stdout.flush()
 
@@ -900,6 +933,7 @@ def browser_worker_main():
                 break
             if command.get("op") != "resolve":
                 continue
+            request_id = command.get("request_id")
             try:
                 if driver is not None:
                     try:
@@ -976,7 +1010,15 @@ class EeclassDownloaderApp(tk.Tk):
         self.browser_write_lock = threading.Lock()
         self.browser_resolving = False
         self.closing = False
+        self.operation_id = 0
+        self.batch_active = False
+        self.batch_jobs = []
+        self.batch_index = -1
+        self.batch_stop_requested = False
+        self.batch_phase = "idle"
         self.url_var = tk.StringVar()
+        self.url_vars = [self.url_var]
+        self.url_rows = []
         self.quality_var = tk.StringVar()
         self.name_var = tk.StringVar()
         self.output_var = tk.StringVar(value=str(get_downloads_dir()))
@@ -985,7 +1027,6 @@ class EeclassDownloaderApp(tk.Tk):
         self.percent_var = tk.StringVar(value="")
         self.video_var = tk.StringVar(value="尚未選擇影片")
         self._build_ui()
-        self.url_var.trace_add("write", self._url_changed)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.after(100, self._drain_queue)
 
@@ -1009,8 +1050,20 @@ class EeclassDownloaderApp(tk.Tk):
         style.configure("Primary.TButton", background=self.ACCENT, foreground="white", font=("Microsoft JhengHei UI", 10, "bold"))
         style.map("Primary.TButton", background=[("disabled", "#CBD4F2"), ("active", "#3451CE")], foreground=[("disabled", "#FFFFFF")])
         style.configure("Horizontal.TProgressbar", background=self.ACCENT, troughcolor="#E9EDF7", borderwidth=0, lightcolor=self.ACCENT, darkcolor=self.ACCENT)
-        root = ttk.Frame(self, padding=28)
-        root.pack(fill="both", expand=True)
+        # Scroll the whole form so added URL rows never push controls off-screen.
+        shell = ttk.Frame(self)
+        shell.pack(fill="both", expand=True)
+        self.form_canvas = tk.Canvas(shell, bg=self.BG, highlightthickness=0)
+        form_scroll = ttk.Scrollbar(shell, orient="vertical", command=self.form_canvas.yview)
+        form_scroll.pack(side="right", fill="y")
+        self.form_canvas.pack(side="left", fill="both", expand=True)
+        self.form_canvas.configure(yscrollcommand=form_scroll.set)
+        root = ttk.Frame(self.form_canvas, padding=28)
+        form_window = self.form_canvas.create_window((0, 0), window=root, anchor="nw")
+        root.bind("<Configure>", lambda _: self.form_canvas.configure(scrollregion=self.form_canvas.bbox("all")))
+        self.form_canvas.bind("<Configure>", lambda event: self.form_canvas.itemconfigure(form_window, width=event.width))
+        self.bind("<MouseWheel>", lambda event: self.form_canvas.yview_scroll(-int(event.delta / 120), "units")
+                  if event.widget is not self.log else None)
         root.columnconfigure(0, weight=1)
         ttk.Label(root, text="eeClass 影片下載", style="Title.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(root, text="NPTU  /  將課程影片儲存為 MP4", style="Sub.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 22))
@@ -1019,14 +1072,17 @@ class EeclassDownloaderApp(tk.Tk):
         link.grid(row=2, column=0, sticky="ew", pady=(0, 14))
         link.columnconfigure(0, weight=1)
         ttk.Label(link, text="01   貼上影片連結", style="Heading.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 10))
-        self.url_entry = ttk.Entry(link, textvariable=self.url_var)
-        self.url_entry.grid(row=1, column=0, sticky="ew", padx=(0, 10))
-        self.url_entry.bind("<Return>", lambda _: self.resolve())
+        self.add_url_btn = ttk.Button(link, text="＋ 新增網址", command=self.add_url_row)
+        self.add_url_btn.grid(row=0, column=1, sticky="e", pady=(0, 10))
+        self.urls_frame = ttk.Frame(link, style="Card.TFrame")
+        self.urls_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.urls_frame.columnconfigure(0, weight=1)
+        self.add_url_row(first=True)
         self.resolve_btn = ttk.Button(link, text="解析影片", style="Primary.TButton", command=self.resolve)
-        self.resolve_btn.grid(row=1, column=1)
+        self.resolve_btn.grid(row=3, column=1, sticky="e", pady=(10, 0))
         self.import_btn = ttk.Button(root, text="匯入 HTML（備用）", command=self.import_page)
         self.import_btn.grid(row=7, column=0, sticky="w", pady=(8, 0))
-        ttk.Label(link, text="例如：https://eeclass.nptu.edu.tw/media/doc/46712", style="Muted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(9, 0))
+        ttk.Label(link, text="第一欄必填，其餘空白會略過。多筆網址依序下載最高畫質，\n檔名自動使用影片標題；開始前請先選好下方儲存位置。", style="Muted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(9, 0))
 
         card = ttk.Frame(root, style="Card.TFrame", padding=18)
         card.grid(row=3, column=0, sticky="ew", pady=(0, 14))
@@ -1060,6 +1116,21 @@ class EeclassDownloaderApp(tk.Tk):
         self.browser_actions = ttk.Frame(progress_card, style="Card.TFrame")
         self.browser_actions.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
         self.browser_actions.grid_remove()
+        self.batch_stop_btn = ttk.Button(progress_card, text="完成此支後停止", command=self.stop_batch)
+        self.batch_stop_btn.grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        self.batch_stop_btn.grid_remove()
+        self.batch_frame = ttk.Frame(root)
+        self.batch_frame.grid(row=8, column=0, sticky="ew", pady=(14, 0))
+        self.batch_frame.columnconfigure(0, weight=1)
+        self.batch_table = ttk.Treeview(self.batch_frame, columns=("number", "video", "state"), show="headings", height=5)
+        for column, label, width in (("number", "序號", 45), ("video", "影片／網址", 450), ("state", "狀態", 110)):
+            self.batch_table.heading(column, text=label)
+            self.batch_table.column(column, width=width, stretch=column == "video")
+        self.batch_table.grid(row=0, column=0, sticky="ew")
+        batch_scroll = ttk.Scrollbar(self.batch_frame, command=self.batch_table.yview)
+        batch_scroll.grid(row=0, column=1, sticky="ns")
+        self.batch_table.configure(yscrollcommand=batch_scroll.set)
+        self.batch_frame.grid_remove()
         actions = ttk.Frame(root)
         actions.grid(row=5, column=0, sticky="ew", pady=(18, 0))
         self.download_btn = ttk.Button(actions, text="下載 MP4", style="Primary.TButton", command=self.download, state="disabled")
@@ -1083,6 +1154,44 @@ class EeclassDownloaderApp(tk.Tk):
         self.log_frame.grid_remove()
         root.rowconfigure(6, weight=1)
         self.url_entry.focus_set()
+
+    def add_url_row(self, first=False):
+        if self.busy or self.batch_active:
+            return
+        variable = self.url_var if first else tk.StringVar()
+        if not first:
+            self.url_vars.append(variable)
+        row = ttk.Frame(self.urls_frame, style="Card.TFrame")
+        row.pack(fill="x", pady=(0, 7))
+        label = ttk.Label(row, text="1 *" if first else str(len(self.url_vars)), width=4)
+        label.pack(side="left")
+        entry = ttk.Entry(row, textvariable=variable)
+        entry.pack(side="left", fill="x", expand=True)
+        entry.bind("<Return>", lambda _: self.resolve())
+        remove = None
+        if first:
+            self.url_entry = entry
+        else:
+            remove = ttk.Button(row, text="−", width=3, command=lambda: self.remove_url_row(variable))
+            remove.pack(side="right", padx=(8, 0))
+        trace = variable.trace_add("write", self._url_changed)
+        self.url_rows.append((variable, row, label, entry, remove, trace))
+        if not first:
+            entry.focus_set()
+
+    def remove_url_row(self, variable):
+        if self.busy or self.batch_active or variable is self.url_var:
+            return
+        for item in self.url_rows:
+            if item[0] is variable:
+                variable.trace_remove("write", item[5])
+                item[1].destroy()
+                self.url_rows.remove(item)
+                self.url_vars.remove(variable)
+                break
+        for index, item in enumerate(self.url_rows, 1):
+            item[2].configure(text="1 *" if index == 1 else str(index))
+        self._url_changed()
 
     def _write_log(self, text):
         self.log.configure(state="normal")
@@ -1114,16 +1223,23 @@ class EeclassDownloaderApp(tk.Tk):
             self.continue_btn.pack_forget()
             self.cancel_btn.pack_forget()
             self.browser_actions.grid_remove()
-        state = "disabled" if value else "normal"
-        for widget in (self.url_entry, self.resolve_btn, self.import_btn, self.name_entry, self.output_entry, self.folder_btn):
+        locked = value or self.batch_active
+        state = "disabled" if locked else "normal"
+        for widget in (self.add_url_btn, self.resolve_btn, self.import_btn, self.name_entry, self.output_entry, self.folder_btn):
             widget.configure(state=state)
-        ready = bool(self.sources) and not value
+        if sum(bool(variable.get().strip()) for variable in self.url_vars) > 1:
+            self.import_btn.configure(state="disabled")
+        for _, _, _, entry, remove, _ in self.url_rows:
+            entry.configure(state=state)
+            if remove:
+                remove.configure(state=state)
+        ready = bool(self.sources) and not locked
         self.download_btn.configure(state="normal" if ready else "disabled")
         self.copy_btn.configure(state="normal" if ready else "disabled")
         self.quality_box.configure(state="readonly" if ready else "disabled")
 
     def _url_changed(self, *_):
-        if self.busy:
+        if self.busy or self.batch_active:
             return
         self.sources = []
         self.page_url = ""
@@ -1137,16 +1253,98 @@ class EeclassDownloaderApp(tk.Tk):
         self.percent_var.set("")
         self.status_var.set("等待解析")
         self.detail_var.set("貼上網址後，按「解析影片」。")
+        count = sum(bool(variable.get().strip()) for variable in self.url_vars)
+        self.resolve_btn.configure(text=f"批次下載（{count}）" if count > 1 else "解析影片")
+        if count > 1:
+            self.detail_var.set(f"共 {count} 支影片，將以最高畫質依序下載。請先確認儲存位置。")
         self._set_busy(False)
+
+    def _batch_status(self, state, detail=None):
+        job = self.batch_jobs[self.batch_index]
+        job["state"] = state
+        if detail is not None:
+            job["detail"] = str(detail)
+        self.batch_table.item(str(self.batch_index), values=(self.batch_index + 1, job.get("title") or job["url"], state))
+        self.batch_table.see(str(self.batch_index))
+
+    def start_batch(self, urls):
+        # Validate dependencies and destination before downloading any item.
+        try:
+            find_ytdlp()
+            destination = Path(self.output_var.get().strip() or get_downloads_dir()).expanduser().resolve()
+            destination.mkdir(parents=True, exist_ok=True)
+        except (OSError, RuntimeError) as error:
+            messagebox.showerror(APP_TITLE, str(error), parent=self)
+            return
+        self.batch_output_dir = destination
+        self.batch_jobs = [{"url": url, "state": "待處理"} for url in urls]
+        self.batch_index = -1
+        self.batch_active = True
+        self.batch_stop_requested = False
+        self.batch_phase = "idle"
+        self.batch_table.delete(*self.batch_table.get_children())
+        for index, job in enumerate(self.batch_jobs):
+            self.batch_table.insert("", "end", iid=str(index), values=(index + 1, job["url"], "待處理"))
+        self.batch_frame.grid()
+        self.batch_stop_btn.configure(state="normal", text="完成此支後停止")
+        self.batch_stop_btn.grid()
+        self._write_log(f"[批次開始] {len(urls)} 支影片；儲存位置：{destination}")
+        self._next_batch_item()
+
+    def stop_batch(self):
+        if not self.batch_active:
+            return
+        self.batch_stop_requested = True
+        self.batch_stop_btn.configure(state="disabled", text="完成此支後停止…")
+        self._write_log("[批次] 已要求停止；目前影片完成後，不再開始下一支。")
+
+    def _next_batch_item(self):
+        if not self.batch_active:
+            return
+        if self.batch_stop_requested or self.batch_index + 1 >= len(self.batch_jobs):
+            for index in range(self.batch_index + 1, len(self.batch_jobs)):
+                job = self.batch_jobs[index]
+                job["state"] = "未下載"
+                self.batch_table.item(str(index), values=(index + 1, job["url"], "未下載"))
+            succeeded = sum(job["state"] == "完成" for job in self.batch_jobs)
+            failed = sum(job["state"] == "失敗" for job in self.batch_jobs)
+            remaining = len(self.batch_jobs) - succeeded - failed
+            self.batch_active = False
+            self.batch_phase = "idle"
+            self.batch_stop_btn.grid_remove()
+            self._set_busy(False)
+            self.status_var.set("批次已停止" if self.batch_stop_requested else "批次處理結束")
+            summary = f"成功 {succeeded} 支／失敗 {failed} 支／未完成 {remaining} 支。個別結果請見下方清單與紀錄。"
+            self.detail_var.set(summary)
+            self._write_log("[批次結果] " + summary)
+            return
+        self.batch_index += 1
+        self.batch_phase = "resolve"
+        self._batch_status("解析中")
+        self._resolve_url(self.batch_jobs[self.batch_index]["url"])
+
+    def _finish_batch_item(self, state, detail):
+        if not self.batch_active or self.batch_phase == "idle":
+            return
+        self._batch_status(state, detail)
+        self._write_log(f"[批次 {self.batch_index + 1}/{len(self.batch_jobs)} {state}] {detail}")
+        self.batch_phase = "idle"
+        self.operation_id += 1  # Reject late events from the completed operation.
+        self.browser_resolving = False
+        self._set_busy(True)
+        self.after(100, self._next_batch_item)
 
     def _drain_queue(self):
         try:
             for _ in range(100):
-                kind, payload = self.msg_queue.get_nowait()
+                event = self.msg_queue.get_nowait()
+                kind, payload = event[:2]
+                if len(event) > 2 and event[2] != self.operation_id:
+                    continue
                 if kind == "log":
                     self._write_log(payload)
                 elif kind == "browser_status":
-                    self.status_var.set("正在準備自動解析")
+                    self.status_var.set(f"正在準備 {self.batch_index + 1}/{len(self.batch_jobs)}" if self.batch_active else "正在準備自動解析")
                     self.detail_var.set(str(payload))
                     self._write_log(str(payload))
                 elif kind == "browser_ready":
@@ -1163,10 +1361,13 @@ class EeclassDownloaderApp(tk.Tk):
                     self.status_var.set("已取消解析")
                     self.detail_var.set("Firefox 視窗已保留，可完成登入後重新解析。")
                     self._set_busy(False)
+                    if self.batch_active:
+                        self.batch_stop_requested = True
+                        self._finish_batch_item("已取消", "使用者取消解析，停止後續批次。")
                 elif kind == "browser_result":
                     self.browser_auth = {"cookies": payload["cookies"], "user_agent": payload.get("user_agent")}
                     self.msg_queue.put(("resolved", (payload["sources"], payload["page_url"],
-                        automation_directory() / "firefox-profile", payload["title"])))
+                        automation_directory() / "firefox-profile", payload["title"]), self.operation_id))
                     self._write_log(f"[瀏覽器解析完成] 已取得 {len(payload['sources'])} 種畫質")
                 elif kind == "resolved":
                     self.sources, self.page_url, self.profile, title = payload
@@ -1179,6 +1380,12 @@ class EeclassDownloaderApp(tk.Tk):
                     self.status_var.set("影片已就緒")
                     self.detail_var.set(f"找到 {len(self.sources)} 種畫質，已選擇最高畫質。")
                     self._set_busy(False)
+                    if self.batch_active:
+                        self.batch_jobs[self.batch_index]["title"] = title
+                        self.name_var.set(f"{self.batch_index + 1:03d}_{sanitize_filename(title)}")
+                        self.batch_phase = "download"
+                        self._batch_status("下載中")
+                        self.download()
                 elif kind == "progress":
                     percent, detail = payload
                     if percent is not None:
@@ -1194,6 +1401,8 @@ class EeclassDownloaderApp(tk.Tk):
                     self.detail_var.set(str(payload))
                     self._write_log(f"[完成] {payload}")
                     self._set_busy(False)
+                    if self.batch_active:
+                        self._finish_batch_item("完成", payload)
                 elif kind == "error":
                     self.progress.stop()
                     self.progress.configure(mode="determinate", value=0)
@@ -1202,7 +1411,10 @@ class EeclassDownloaderApp(tk.Tk):
                     self.detail_var.set("請依照錯誤提示修正後重試，也可以展開紀錄。")
                     self._write_log(f"[錯誤] {payload}")
                     self._set_busy(False)
-                    messagebox.showerror(APP_TITLE, str(payload), parent=self)
+                    if self.batch_active:
+                        self._finish_batch_item("失敗", payload)
+                    else:
+                        messagebox.showerror(APP_TITLE, str(payload), parent=self)
         except queue.Empty:
             pass
         self.after(100, self._drain_queue)
@@ -1224,7 +1436,7 @@ class EeclassDownloaderApp(tk.Tk):
             messagebox.showerror(APP_TITLE, f"無法開啟資料夾：{e}", parent=self)
 
     def import_page(self):
-        if self.busy:
+        if self.busy or self.batch_active:
             return
         url = self.url_var.get().strip()
         if not is_eeclass_https(url):
@@ -1254,44 +1466,48 @@ class EeclassDownloaderApp(tk.Tk):
                 if len(candidates) > 1:
                     raise RuntimeError("已找到影片，但有多個 Firefox 設定檔可供下載。請先用「解析影片」確認正確設定檔，再提供紀錄以設定下載來源。")
                 profile = candidates[0][1]
-                self.msg_queue.put(("log", f"[匯入 v1.5] 從本機 HTML 找到 {len(sources)} 種畫質；Firefox 設定檔：{profile.name}"))
+                self.msg_queue.put(("log", f"[匯入 v1.6] 從本機 HTML 找到 {len(sources)} 種畫質；Firefox 設定檔：{profile.name}"))
                 self.msg_queue.put(("resolved", (sources, url, profile, title)))
             except Exception as e:
                 self.msg_queue.put(("error", str(e)))
         threading.Thread(target=worker, daemon=True).start()
 
     def resolve(self):
-        if self.busy:
+        if self.busy or self.batch_active:
             return
-        url = self.url_var.get().strip()
         try:
-            parsed = urllib.parse.urlparse(url)
-            valid = parsed.scheme == "https" and parsed.hostname == EECLASS_HOST and not parsed.username and not parsed.password and parsed.port in (None, 443)
-        except ValueError:
-            valid = False
-        if not valid:
-            messagebox.showerror(APP_TITLE, "請輸入 https://eeclass.nptu.edu.tw/ 的影片頁面網址。", parent=self)
+            urls = collect_video_urls([variable.get() for variable in self.url_vars])
+        except ValueError as error:
+            messagebox.showerror(APP_TITLE, str(error), parent=self)
             return
+        if len(urls) > 1:
+            self.start_batch(urls)
+        else:
+            self._resolve_url(urls[0])
+
+    def _resolve_url(self, url):
+        self.operation_id += 1
+        operation_id = self.operation_id
         self.sources = []
         self.page_url = ""
         self.profile = None
         self.browser_auth = None
         self.quality_box.set("")
         self._set_busy(True)
-        self.status_var.set("正在解析影片")
+        self.status_var.set(f"正在解析 {self.batch_index + 1}/{len(self.batch_jobs)}" if self.batch_active else "正在解析影片")
         self.detail_var.set("自動開啟影片頁面並取得可用畫質…")
         self.percent_var.set("")
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
         self.browser_resolving = True
-        self._write_log("[自動解析 v1.5] " + url)
+        self._write_log("[自動解析 v1.6] " + url)
         def worker():
             try:
                 self.start_browser_worker()
-                self.msg_queue.put(("browser_ready", None))
-                self.send_browser_command({"op": "resolve", "url": url})
+                self.send_browser_command({"op": "resolve", "url": url, "request_id": operation_id})
+                self.msg_queue.put(("browser_ready", None, operation_id))
             except Exception as e:
-                self.msg_queue.put(("error", str(e)))
+                self.msg_queue.put(("error", str(e), operation_id))
         threading.Thread(target=worker, daemon=True).start()
 
     def send_browser_command(self, command):
@@ -1304,12 +1520,13 @@ class EeclassDownloaderApp(tk.Tk):
                 proc.stdin.flush()
         except (OSError, RuntimeError) as error:
             if not self.closing:
-                self.msg_queue.put(("error", str(error)))
+                self.msg_queue.put(("error", str(error), command.get("request_id", self.operation_id)))
 
     def start_browser_worker(self):
         if self.browser_process is not None and self.browser_process.poll() is None:
             return
-        python = automation_python(lambda text: self.msg_queue.put(("browser_status", text)))
+        operation_id = self.operation_id
+        python = automation_python(lambda text: self.msg_queue.put(("browser_status", text, operation_id)))
         proc = subprocess.Popen([str(python), "-u", str(Path(__file__).resolve()), "--browser-worker"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace", **quiet_process_kwargs())
@@ -1327,13 +1544,13 @@ class EeclassDownloaderApp(tk.Tk):
                     if not isinstance(event, dict):
                         continue
                     if event.get("type") == "result":
-                        self.msg_queue.put(("browser_result", event))
+                        self.msg_queue.put(("browser_result", event, event.get("request_id")))
                     elif event.get("type") in mapping:
-                        self.msg_queue.put((mapping[event["type"]], event.get("text", "")))
+                        self.msg_queue.put((mapping[event["type"]], event.get("text", ""), event.get("request_id")))
             finally:
                 proc.wait()
-                if not self.closing and self.browser_resolving:
-                    self.msg_queue.put(("error", "瀏覽器自動化程序已結束，請重新解析。"))
+                if not self.closing and self.browser_resolving and self.browser_process is proc:
+                    self.msg_queue.put(("error", "瀏覽器自動化程序已結束，請重新解析。", self.operation_id))
         threading.Thread(target=reader, daemon=True).start()
 
     def selected_source(self):
@@ -1353,27 +1570,22 @@ class EeclassDownloaderApp(tk.Tk):
             return
         try:
             executable = find_ytdlp()
-            out_dir = Path(self.output_var.get().strip() or get_downloads_dir()).expanduser()
+            batch_active = getattr(self, "batch_active", False)
+            out_dir = self.batch_output_dir if batch_active else Path(self.output_var.get().strip() or get_downloads_dir()).expanduser()
             out_dir.mkdir(parents=True, exist_ok=True)
-            title = self.name_var.get().strip()
-            if title.lower().endswith(".mp4"):
-                title = title[:-4]
-            title = sanitize_filename(title)[:150].rstrip(" .") or "eeclass_video"
-            if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", title, re.I):
-                title = "_" + title
-            quality = f"_{source['width']}x{source['height']}" if source.get("width") and source.get("height") else ""
-            output_path = out_dir / f"{title}{quality}.mp4"
-            counter = 2
-            while output_path.exists():
-                output_path = out_dir / f"{title}{quality} ({counter}).mp4"
-                counter += 1
+            output_path = download_output_path(out_dir, self.name_var.get(), source)
             page_url, profile = self.page_url, self.profile
             browser_auth = self.browser_auth
         except (OSError, RuntimeError) as e:
-            messagebox.showerror(APP_TITLE, str(e), parent=self)
+            if getattr(self, "batch_active", False):
+                self._finish_batch_item("失敗", str(e))
+            else:
+                messagebox.showerror(APP_TITLE, str(e), parent=self)
             return
+        self.operation_id = getattr(self, "operation_id", 0) + 1
+        operation_id = self.operation_id
         self._set_busy(True)
-        self.status_var.set("正在下載 MP4")
+        self.status_var.set(f"正在下載 {self.batch_index + 1}/{len(self.batch_jobs)}" if batch_active else "正在下載 MP4")
         self.detail_var.set("正在連線，請稍候…")
         self.percent_var.set("")
         self.progress.configure(mode="indeterminate", value=0)
@@ -1400,17 +1612,17 @@ class EeclassDownloaderApp(tk.Tk):
                     for line in proc.stdout:
                         progress = parse_progress(line)
                         if progress is not None:
-                            self.msg_queue.put(("progress", progress))
+                            self.msg_queue.put(("progress", progress, operation_id))
                         else:
-                            self.msg_queue.put(("log", line.rstrip()))
+                            self.msg_queue.put(("log", line.rstrip(), operation_id))
                     code = proc.wait()
                 if code:
                     raise RuntimeError(f"下載失敗（代碼 {code}）。請展開紀錄查看原因，並確認 Firefox 仍登入 eeClass。")
                 if not output_path.is_file() or output_path.stat().st_size == 0:
                     raise RuntimeError("下載程序已結束，但沒有找到完整的 MP4 檔案。請查看紀錄。")
-                self.msg_queue.put(("done", output_path))
+                self.msg_queue.put(("done", output_path, operation_id))
             except Exception as e:
-                self.msg_queue.put(("error", str(e)))
+                self.msg_queue.put(("error", str(e), operation_id))
             finally:
                 if cookie_temp is not None:
                     cookie_temp.cleanup()
@@ -1420,7 +1632,7 @@ class EeclassDownloaderApp(tk.Tk):
         if self.closing:
             return
         if self.busy:
-            messagebox.showinfo(APP_TITLE, "請先按「取消解析」或等待下載／首次設定完成，再關閉程式。", parent=self)
+            messagebox.showinfo(APP_TITLE, "請先取消解析，或按「完成此支後停止」並等候目前下載完成，再關閉程式。", parent=self)
             return
         self.closing = True
         proc = self.browser_process
