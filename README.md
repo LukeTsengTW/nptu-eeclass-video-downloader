@@ -6,7 +6,7 @@ Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影
 
 ## Windows 一般使用者
 
-下載 [Windows EXE 建置成品](https://github.com/LukeTsengTW/nptu-eeclass-video-downloader/actions/workflows/windows-build.yml)：選擇成功的建置，在 Artifacts 下載 `eeClass-Windows-x64`，解壓縮後雙擊 `eeClass-Downloader.exe`。私人 repository 需要先登入有存取權限的 GitHub 帳號。
+下載 [v1.7.0 Windows 免安裝版](https://github.com/LukeTsengTW/nptu-eeclass-video-downloader/releases/tag/v1.7.0) 的 `eeClass-v1.7.0-Windows-x64.zip`，解壓縮後雙擊 `eeClass-Downloader.exe`。壓縮包包含 EXE、快速說明、第三方授權與 SHA-256 校驗碼，共 4 個檔案。私人 repository 需要先登入有存取權限的 GitHub 帳號。
 
 **不必安裝 Python、pip、Selenium、yt-dlp 或 FFmpeg。** 若電腦已有可用 Firefox 就直接使用；沒有時才下載並重用專用瀏覽器。支援 Windows 10／11 x64，不要求系統管理員權限。首次瀏覽器準備需要網路。
 

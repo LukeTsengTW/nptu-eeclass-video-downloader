@@ -1,0 +1,159 @@
+name: Publish Windows v1.7.0
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release-v1.7.0.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-v1.7.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify tested artifact, package and publish release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import zipfile
+
+          REPO = 'LukeTsengTW/nptu-eeclass-video-downloader'
+          SOURCE = '98f4c73bbad1a4e0f80fddab77f85e38ad4d327c'
+          RUN = 37626247037
+          ARTIFACT = 11484650903
+          ORIGINAL_DIGEST = '29250a39c713f49867fba92ec2de7011838f43963ba6149ba7cfa51929027cfc'
+          TAG = 'v1.7.0'
+          ZIP_NAME = 'eeClass-v1.7.0-Windows-x64.zip'
+          BASE = f'https://api.github.com/repos/{REPO}'
+          assert os.environ['GITHUB_REPOSITORY'] == REPO
+
+          class SafeRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, msg, headers, newurl):
+                  result = super().redirect_request(request, fp, code, msg, headers, newurl)
+                  if result is not None and urllib.parse.urlsplit(newurl).netloc != urllib.parse.urlsplit(request.full_url).netloc:
+                      result.remove_header('Authorization')
+                  return result
+
+          opener = urllib.request.build_opener(SafeRedirect())
+          def api(path, method='GET', data=None, binary=False, content_type=None, missing=False):
+              url = path if path.startswith('https://') else BASE + path
+              assert urllib.parse.urlsplit(url).hostname in ('api.github.com', 'uploads.github.com')
+              headers = {'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'],
+                         'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28',
+                         'User-Agent': 'eeClass-release-workflow'}
+              if data is not None:
+                  if isinstance(data, bytes):
+                      headers['Content-Type'] = content_type or 'application/octet-stream'
+                  else:
+                      data = json.dumps(data).encode('utf-8')
+                      headers['Content-Type'] = 'application/json'
+              try:
+                  with opener.open(urllib.request.Request(url, data=data, headers=headers, method=method), timeout=180) as response:
+                      payload = response.read()
+              except urllib.error.HTTPError as error:
+                  if missing and error.code == 404:
+                      return None
+                  raise RuntimeError(f'GitHub {method} failed: HTTP {error.code}') from None
+              return payload if binary else json.loads(payload)
+
+          run = api(f'/actions/runs/{RUN}')
+          assert run['conclusion'] == 'success' and run['head_sha'] == SOURCE
+          artifact = api(f'/actions/artifacts/{ARTIFACT}')
+          assert artifact['workflow_run']['head_sha'] == SOURCE and not artifact['expired']
+          original = api(f'/actions/artifacts/{ARTIFACT}/zip', binary=True)
+          assert hashlib.sha256(original).hexdigest() == ORIGINAL_DIGEST
+          with zipfile.ZipFile(io.BytesIO(original)) as archive:
+              names = archive.namelist()
+              def member(name):
+                  hits = [path for path in names if path == name or path.endswith('/' + name)]
+                  assert len(hits) == 1, (name, hits)
+                  return archive.read(hits[0])
+              executable = member('eeClass-Downloader.exe')
+              expected = member('SHA256SUMS.txt').decode('ascii').split()[0]
+              assert re.fullmatch('[0-9a-f]{64}', expected)
+              assert executable.startswith(b'MZ') and hashlib.sha256(executable).hexdigest() == expected
+              quick_start = member('Windows快速開始.txt')
+              sections = ['第三方元件授權資訊\n\n本檔彙整原建置成品隨附的完整授權與元件版本。\n']
+              for name in sorted(names):
+                  if 'third_party_licenses/' in name and not name.endswith('/'):
+                      sections.append('\n\n===== ' + name.split('third_party_licenses/', 1)[1] + ' =====\n')
+                      sections.append(archive.read(name).decode('utf-8-sig', errors='replace'))
+              assert len(sections) > 1
+          quick = quick_start.decode('utf-8-sig').replace('隨附 third_party_licenses 保存第三方元件授權資訊', '隨附「第三方授權.txt」保存第三方元件授權資訊').replace('詳細操作請參閱「使用說明.txt」。', '詳細操作請參閱 GitHub 專案 README。')
+          contents = {'eeClass-Downloader.exe': executable, '快速開始.txt': quick.encode('utf-8-sig'),
+                      '第三方授權.txt': ''.join(sections).encode('utf-8-sig')}
+          contents['SHA256SUMS.txt'] = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, data in contents.items()).encode('utf-8')
+          buffer = io.BytesIO()
+          with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
+              for name, data in contents.items():
+                  info = zipfile.ZipInfo(name, date_time=(2026, 10, 7, 0, 0, 0))
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  output.writestr(info, data)
+          package = buffer.getvalue()
+          with zipfile.ZipFile(io.BytesIO(package)) as check:
+              assert set(check.namelist()) == set(contents)
+              assert check.testzip() is None
+              assert hashlib.sha256(check.read('eeClass-Downloader.exe')).hexdigest() == expected
+          package_digest = hashlib.sha256(package).hexdigest()
+          checksum = f'{package_digest}  {ZIP_NAME}\n'.encode('ascii')
+
+          ref = api(f'/git/ref/tags/{TAG}', missing=True)
+          if ref is None:
+              tag = api('/git/tags', method='POST', data={'tag': TAG, 'message': 'eeClass Windows EXE v1.7.0; verified build ' + str(RUN), 'object': SOURCE, 'type': 'commit'})
+              ref = api('/git/refs', method='POST', data={'ref': 'refs/tags/' + TAG, 'sha': tag['sha']})
+          target = ref['object']
+          if target['type'] == 'tag':
+              target = api('/git/tags/' + target['sha'])['object']
+          assert target['type'] == 'commit' and target['sha'] == SOURCE, 'Existing tag points elsewhere; will not overwrite'
+
+          body = f'''Windows 10／11 x64 免安裝版。下載 `{ZIP_NAME}`，解壓縮後雙擊 `eeClass-Downloader.exe`。
+
+          不需自行安裝 Python、Selenium、yt-dlp 或 FFmpeg；Firefox 會優先重用，缺少時才下載。包含單支與批次下載。
+
+          壓縮包只有 EXE、快速開始、第三方授權與 SHA-256 校驗碼，共 4 個檔案。
+
+          來源 commit：`{SOURCE}`。沿用 [成功建置 #{RUN}](https://github.com/{REPO}/actions/runs/{RUN}) 的 EXE，二進位內容未變更。已通過 89 項 Windows 測試及實際 EXE 的 GUI、背景程序、Firefox 空白頁與本機 HTTP 下載測試；eeClass 真實帳號與課程下載仍需使用者驗證。
+
+          EXE SHA-256：`{expected}`
+          ZIP SHA-256：`{package_digest}`
+
+          EXE 尚未簽章，Windows 可能顯示未知發行者提示。'''
+          release = api('/releases/tags/' + TAG, missing=True)
+          if release is None:
+              release = api('/releases', method='POST', data={'tag_name': TAG, 'target_commitish': SOURCE,
+                            'name': 'v1.7.0 — Windows EXE 免安裝版', 'body': body, 'draft': True, 'prerelease': False})
+          expected_assets = {ZIP_NAME: package, 'SHA256SUMS.txt': checksum}
+          existing = {asset['name']: asset for asset in api(f"/releases/{release['id']}/assets")}
+          for name, data in expected_assets.items():
+              digest = 'sha256:' + hashlib.sha256(data).hexdigest()
+              if name in existing:
+                  assert existing[name]['state'] == 'uploaded' and existing[name].get('digest') == digest, 'Asset differs; will not overwrite'
+              else:
+                  assert release['draft'], 'Will not modify an already published release'
+                  url = release['upload_url'].split('{')[0] + '?name=' + urllib.parse.quote(name)
+                  asset = api(url, method='POST', data=data, content_type='application/zip' if name.endswith('.zip') else 'text/plain')
+                  assert asset['state'] == 'uploaded' and asset.get('digest') == digest
+          if release['draft']:
+              release = api(f"/releases/{release['id']}", method='PATCH', data={'draft': False, 'make_latest': 'true'})
+          print(json.dumps({'tag': TAG, 'source_sha': SOURCE, 'release': release['html_url'],
+                            'exe_sha256': expected, 'zip_sha256': package_digest, 'zip_bytes': len(package),
+                            'files': list(contents)}, ensure_ascii=False))
+          PY
