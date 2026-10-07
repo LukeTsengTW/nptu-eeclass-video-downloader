@@ -27,7 +27,7 @@ class Tests(unittest.TestCase):
   self.assertIsNone(m.parse_progress('EECLASS_PROGRESS|10'))
  def test_command(self):
   cmd=m.build_download_command(['yt-dlp'],{'url':'https://eeclass.nptu.edu.tw/test.mp4'},'https://eeclass.nptu.edu.tw/media/doc/3',Path('C:/Profile name'),Path('100% course.mp4'))
-  self.assertEqual(cmd[cmd.index('--cookies-from-browser')+1],'firefox:C:/Profile name')
+  self.assertEqual(cmd[cmd.index('--cookies-from-browser')+1],'firefox:'+str(Path('C:/Profile name')))
   self.assertEqual(cmd[cmd.index('-o')+1],'100%% course.mp4')
   self.assertIn('--no-overwrites',cmd)
  def test_cookie_filtering(self):

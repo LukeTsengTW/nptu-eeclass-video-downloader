@@ -2,9 +2,19 @@
 
 Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影片下載為 MP4。貼上影片頁面網址後，由專用 Firefox 讀取播放器資料並提供畫質選擇。
 
-目前版本：**1.6，支援批次下載**。本專案提供影片下載，尚未提供格式轉換或重新編碼。
+目前版本：**1.7，Windows EXE 版**。本專案提供影片下載，尚未提供格式轉換或重新編碼。
 
-## 使用方式
+## Windows 一般使用者
+
+下載 [Windows EXE 建置成品](https://github.com/LukeTsengTW/nptu-eeclass-video-downloader/actions/workflows/windows-build.yml)：選擇成功的建置，在 Artifacts 下載 `eeClass-Windows-x64`，解壓縮後雙擊 `eeClass-Downloader.exe`。私人 repository 需要先登入有存取權限的 GitHub 帳號。
+
+**不必安裝 Python、pip、Selenium、yt-dlp 或 FFmpeg。** 若電腦已有可用 Firefox 就直接使用；沒有時才下載並重用專用瀏覽器。支援 Windows 10／11 x64，不要求系統管理員權限。首次瀏覽器準備需要網路。
+
+貼上單支影片網址後按「解析影片」，在專用 Firefox 正常登入，再選畫質並下載。多支影片使用「＋ 新增網址」與「批次下載」。詳細操作見 [Windows 快速開始](Windows快速開始.txt)。
+
+成品是單一 EXE，Python 與下載元件已內建；單檔執行時會暫時解壓縮執行元件，瀏覽器與登入快取則使用固定的 AppData 位置。未使用程式碼簽章，Windows 可能顯示未知發行者提示。隨附 SHA-256 校驗值與第三方授權資訊。
+
+## 從原始碼執行（開發者）
 
 1. 安裝 Python 3.10 以上（包含 Tcl/Tk、pip、venv）。不必預先安裝 Firefox。
 2. 安裝 yt-dlp，或保留原先可用的 yt-dlp 安裝。使用相同 Python 環境安裝的指令為：
@@ -18,7 +28,7 @@ Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影
 5. 第一次請在程式開啟的專用 Firefox 視窗登入。若登入後仍未顯示畫質，回到下載器按「登入完成，繼續」。
 6. 確認畫質、檔名與儲存位置後，按「下載 MP4」。
 
-本版需要 Python，尚未提供獨立 EXE。專用 Firefox 與日常使用的 Firefox 使用不同設定檔，第一次需要另外登入。登入是否能保留至下次使用，依網站的登入期限與 Cookie 規則而定。
+原始碼版需要 Python；一般使用者請下載上方 EXE 成品。專用 Firefox 與日常使用的 Firefox 使用不同設定檔，第一次需要另外登入。登入是否能保留至下次使用，依網站的登入期限與 Cookie 規則而定。
 
 ## 批次下載
 
@@ -34,7 +44,7 @@ Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影
 
 ## 自動化元件與資料位置
 
-首次解析會在 `%LOCALAPPDATA%\NPTUeeClassDownloader` 建立獨立 Python 環境，安裝固定版本 `selenium==4.50.0`；Selenium Manager 負責取得缺少的 Firefox 與 geckodriver。首次使用需要可連線至 PyPI、Mozilla 的瀏覽器下載來源及 geckodriver 下載來源。
+EXE 已包含 `selenium==4.50.0` 與 yt-dlp，不會呼叫系統 Python 或安裝虛擬環境。只有原始碼版才會在 `%LOCALAPPDATA%\NPTUeeClassDownloader` 建立獨立 Python 環境並安裝 Selenium；Selenium Manager 負責取得缺少的 Firefox 與 geckodriver。首次缺少瀏覽器或驅動時需要可連線至 Mozilla 與 geckodriver 下載來源；只有原始碼版另外需要 PyPI。
 
 瀏覽器依下列順序選擇：
 
@@ -57,7 +67,7 @@ Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影
 
 ## 開發與驗證
 
-主程式為 `eeclass_video_downloader.py`，`eeclass_gui.pyw` 提供無主控台啟動與啟動錯誤提示。介面使用 Python 內建的 Tk/ttk。`requirements.txt` 列出下載器相依套件；Selenium 由程式自動安裝到獨立環境，無須額外安裝到主環境。
+主程式為 `eeclass_video_downloader.py`，`eeclass_gui.pyw` 提供無主控台啟動與啟動錯誤提示。介面使用 Python 內建的 Tk/ttk。`requirements.txt` 列出下載器相依套件；原始碼版的 Selenium 由程式自動安裝到獨立環境，EXE 則使用內建元件。
 
 執行離線測試（需要 Python 的 Tk 模組，但不會開啟 GUI）：
 
@@ -67,9 +77,25 @@ py -3 -m unittest discover -s tests -p "test_eeclass*.py"
 
 其他系統可使用 `python` 取代 `py -3` 執行測試。測試涵蓋解析、TLS 相容處理、Cookie、模擬登入與取消、頁面範圍檢查，以及下載完成／失敗後的暫存清理。測試使用合成資料與瀏覽器替身，不需要學校帳號。
 
-目前 82 項離線測試通過，包含瀏覽器元件管理、第一欄必填、空白略過、新增／移除欄位、循序批次下載、失敗繼續、停止／取消、過期事件隔離、檔名衝突及 Cookie 清理。使用者已確認 1.3 的手動 HTML 匯入能成功下載；**1.6 的 Windows GUI 畫面、瀏覽器實際下載及 eeClass 單支／批次下載仍待實機驗證**。
+目前 89 項離線測試通過，包含瀏覽器元件管理、第一欄必填、空白略過、新增／移除欄位、循序批次下載、失敗繼續、停止／取消、過期事件隔離、檔名衝突及 Cookie 清理。使用者已確認 1.3 的手動 HTML 匯入能成功下載；**eeClass 真實帳號登入與課程影片的單支／批次下載仍需在使用者電腦驗證**。Windows 建置另外測試實際 EXE 的 GUI 初始化、背景程序、Selenium Manager、Firefox 空白頁操作與本機 HTTP 影片傳輸；是否通過請以該次 Actions 結果為準。
 
 回報問題時請附版本、Windows／Python／Firefox 版本與「複製紀錄」內容。請勿上傳登入 Cookie、瀏覽器設定檔或含私人資料的完整 HTML。
+
+## 建置 EXE
+
+請在 Windows x64 與 Python 3.13 的獨立環境執行：
+
+```powershell
+py -3.13 -m venv .venv-build
+.\.venv-build\Scripts\python.exe -m pip install -r requirements-build.txt
+.\.venv-build\Scripts\python.exe -m unittest discover -s tests -p "test_eeclass*.py"
+.\.venv-build\Scripts\python.exe scripts/build_windows.py
+.\.venv-build\Scripts\python.exe scripts/smoke_windows.py dist/eeClass-Windows-x64/eeClass-Downloader.exe
+```
+
+成品位於 `dist/eeClass-Windows-x64`。GitHub Actions 在 Windows runner 上自動執行同一流程，測試成功後才上傳成品，保留 90 天。原始碼 ZIP 不包含已編譯 EXE，請下載 Actions 成品。
+
+使用 PyInstaller console bootloader 的 `hide-early` 模式，雙擊時隱藏主控台，同時保留背景程序需要的標準輸入／輸出；少數電腦啟動時可能短暫閃現主控台。背景瀏覽器與 yt-dlp 由同一 EXE 的內部工作模式執行，不會遞迴開啟 GUI。
 
 ## 技術參考
 

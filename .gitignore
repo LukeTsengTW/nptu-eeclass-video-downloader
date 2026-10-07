@@ -31,3 +31,5 @@ browser-cache/
 browser-assets.json
 browser-assets.tmp
 setup.lock
+*.exe
+.venv-build/

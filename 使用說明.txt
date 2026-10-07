@@ -1,7 +1,7 @@
-﻿eeClass 影片下載器 1.6 — 批次下載版
+﻿eeClass 影片下載器 1.7 — Windows EXE 版
 
 平常使用
-1. 雙擊「開啟_eeClass影片下載器.vbs」。
+1. EXE 版：解壓縮後雙擊 eeClass-Downloader.exe。原始碼版才使用「開啟_eeClass影片下載器.vbs」。
 2. 貼上 eeClass 影片網址，按「解析影片」。
 3. 程式自動開啟 Firefox、取得影片資料，預選最高畫質。
 4. 確認名稱與儲存位置後，按「下載 MP4」。
@@ -18,7 +18,7 @@
 8. 多筆網址時停用「匯入 HTML（備用）」；批次清單不會保存到下次開啟。
 
 第一次使用
-• 首次解析時，程式自動建立自己的 Python 虛擬環境並安裝 Selenium 4.50.0；首次啟動瀏覽器也可能下載 geckodriver，需網路連線。
+• EXE 已內建 Python、Selenium 與 yt-dlp，不需要自行安裝。只有原始碼版會建立 Python 虛擬環境；首次缺少 Firefox 或 geckodriver 時會自動下載，需網路連線。
 • 設定進度顯示在介面中，不需要輸入 PowerShell 指令。
 • 請在「程式新開啟的專用 Firefox 視窗」正常登入 eeClass。
 • 登入完成後，如果尚未自動顯示畫質，回到下載器按「登入完成，繼續」。
@@ -35,10 +35,11 @@
 • 只清理程式自己 browser-cache 內無法通過執行檢查的 Firefox 副本，不刪除系統 Firefox 或其他程式的快取。
 
 環境需求
-• Windows、Python 3.10 以上（含 Tcl/Tk、venv、pip），以及原先已安裝的 yt-dlp。
-• 本版仍是 Python GUI，尚未打包成免 Python 的 EXE。
+• EXE：Windows 10／11 x64，不要求安裝 Python、yt-dlp 或 FFmpeg。
+• 原始碼：Python 3.10 以上（含 Tcl/Tk、venv、pip）與 yt-dlp。
+• 一般使用者請下載 Windows EXE 建置成品，原始碼 ZIP 不包含 EXE。
 • 不必預先安裝 Firefox，也不需要瀏覽器擴充套件。
-• 首次需能連線到 PyPI、Mozilla Firefox 與 geckodriver 的下載來源。若校網限制下載，可換可用網路後重試。
+• EXE 首次缺少瀏覽器元件時需能連線到 Mozilla Firefox 與 geckodriver 來源；原始碼版另需 PyPI。若校網限制下載，可換可用網路後重試。
 • 自動化套件放在使用者 LOCALAPPDATA 下的 NPTUeeClassDownloader 目錄，不變更其他專案的 Python 套件。
 
 操作與限制
@@ -57,9 +58,9 @@
 
 已完成的驗證
 • Python 語法與 Python 3.10 語法相容檢查。
-• 82 項離線測試通過，涵蓋原有解析／TLS／Cookie 與瀏覽器快取功能，以及新增欄位、第一欄必填、空白略過、批次循序處理、失敗繼續、停止／取消、過期事件隔離、檔名衝突及 Cookie 清理。
-• 瀏覽器流程使用測試替身；尚未在使用者 Windows 上完成瀏覽器實際下載、Selenium／Firefox 啟動、GUI 畫面及 eeClass 真實登入／批次下載驗證。
-• 使用者已確認 1.3 的手動 HTML 匯入流程可成功下載；這不等於 1.6 自動模式已經完成實機驗證。
+• 89 項離線測試通過，涵蓋原有解析／TLS／Cookie 與瀏覽器快取功能，以及新增欄位、第一欄必填、空白略過、批次循序處理、失敗繼續、停止／取消、過期事件隔離、檔名衝突及 Cookie 清理。
+• 建置流程另外驗證實際 Windows EXE 的 GUI 初始化、背景程序、Firefox 空白頁操作與本機傳輸，結果以各次 Actions 建置為準。eeClass 真實登入與課程下載仍需在使用者電腦驗證。
+• 使用者已確認 1.3 的手動 HTML 匯入流程可成功下載；這不等於 1.7 自動模式已經完成實機驗證。
 
 技術參考
 https://www.selenium.dev/documentation/selenium_manager/

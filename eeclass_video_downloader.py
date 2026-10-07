@@ -45,7 +45,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 
-APP_TITLE = "NPTU eeClass 影片下載器 · 1.6"
+APP_TITLE = "NPTU eeClass 影片下載器 · 1.7"
 EECLASS_HOST = "eeclass.nptu.edu.tw"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) "
@@ -486,6 +486,8 @@ def get_downloads_dir() -> Path:
 
 
 def find_ytdlp() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--ytdlp-worker"]
     executable = shutil.which("yt-dlp")
     if executable:
         return [executable]
@@ -625,8 +627,21 @@ def setup_lock(report, timeout=600):
 
 
 def automation_python(report):
+    if getattr(sys, "frozen", False):
+        # Selenium is bundled; never run this executable with Python's -m venv/pip.
+        import selenium
+        if selenium.__version__ != SELENIUM_VERSION:
+            raise RuntimeError("內建瀏覽器元件版本不正確，請重新下載完整的 EXE。")
+        return Path(sys.executable)
     with setup_lock(report):
         return _automation_python(report)
+
+
+def browser_worker_command(report):
+    python = automation_python(report)
+    if getattr(sys, "frozen", False):
+        return [str(python), "--browser-worker"]
+    return [str(python), "-u", str(Path(__file__).resolve()), "--browser-worker"]
 
 
 def _automation_python(report):
@@ -1466,7 +1481,7 @@ class EeclassDownloaderApp(tk.Tk):
                 if len(candidates) > 1:
                     raise RuntimeError("已找到影片，但有多個 Firefox 設定檔可供下載。請先用「解析影片」確認正確設定檔，再提供紀錄以設定下載來源。")
                 profile = candidates[0][1]
-                self.msg_queue.put(("log", f"[匯入 v1.6] 從本機 HTML 找到 {len(sources)} 種畫質；Firefox 設定檔：{profile.name}"))
+                self.msg_queue.put(("log", f"[匯入 v1.7] 從本機 HTML 找到 {len(sources)} 種畫質；Firefox 設定檔：{profile.name}"))
                 self.msg_queue.put(("resolved", (sources, url, profile, title)))
             except Exception as e:
                 self.msg_queue.put(("error", str(e)))
@@ -1500,7 +1515,7 @@ class EeclassDownloaderApp(tk.Tk):
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
         self.browser_resolving = True
-        self._write_log("[自動解析 v1.6] " + url)
+        self._write_log("[自動解析 v1.7] " + url)
         def worker():
             try:
                 self.start_browser_worker()
@@ -1526,8 +1541,8 @@ class EeclassDownloaderApp(tk.Tk):
         if self.browser_process is not None and self.browser_process.poll() is None:
             return
         operation_id = self.operation_id
-        python = automation_python(lambda text: self.msg_queue.put(("browser_status", text, operation_id)))
-        proc = subprocess.Popen([str(python), "-u", str(Path(__file__).resolve()), "--browser-worker"],
+        command = browser_worker_command(lambda text: self.msg_queue.put(("browser_status", text, operation_id)))
+        proc = subprocess.Popen(command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace", **quiet_process_kwargs())
         self.browser_process = proc
@@ -1666,8 +1681,60 @@ def main():
     app.mainloop()
 
 
-if __name__ == "__main__":
-    if "--browser-worker" in sys.argv:
+def entry_point(args=None):
+    args = list(sys.argv[1:] if args is None else args)
+    if args and args[0] == "--browser-worker":
         browser_worker_main()
+    elif args and args[0] == "--ytdlp-worker":
+        import yt_dlp
+        yt_dlp.main(args[1:])
+    elif args == ["--self-test-browser"]:
+        from selenium import webdriver
+        from selenium.webdriver.firefox.options import Options
+        from selenium.webdriver.firefox.service import Service
+        browser, driver_path = prepare_firefox(lambda text: print(text, file=sys.stderr))
+        options = Options()
+        options.binary_location = browser
+        options.add_argument("-headless")
+        service = Service(executable_path=driver_path, log_output=subprocess.DEVNULL,
+                          popen_kw={"creation_flags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0})
+        driver = webdriver.Firefox(options=options, service=service)
+        try:
+            driver.set_page_load_timeout(30)
+            driver.get("about:blank")
+            assert driver.execute_script("return 2 + 2") == 4
+        finally:
+            driver.quit()
+        print(json.dumps({"firefox": "ok", "webdriver": "ok"}))
+    elif args == ["--self-test"]:
+        import selenium
+        from selenium.webdriver.common.selenium_manager import SeleniumManager
+        from yt_dlp.version import __version__ as yt_version
+        manager = SeleniumManager._get_binary()
+        if not manager.is_file():
+            raise RuntimeError("Missing bundled Selenium Manager")
+        subprocess.run([str(manager), "--version"], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+                       timeout=30, **quiet_process_kwargs())
+        app = EeclassDownloaderApp()
+        try:
+            app.withdraw()
+            app.url_var.set("https://eeclass.nptu.edu.tw/media/doc/1")
+            app.add_url_row()
+            app.url_vars[1].set("https://eeclass.nptu.edu.tw/media/doc/2")
+            app.add_url_row()
+            assert len(collect_video_urls([v.get() for v in app.url_vars])) == 2
+            assert "批次下載" in app.resolve_btn.cget("text")
+            app._set_busy(True)
+            app._set_busy(False)
+            app.update_idletasks()
+        finally:
+            app.destroy()
+        print(json.dumps({"application": APP_TITLE, "selenium": selenium.__version__,
+                          "yt_dlp": yt_version, "manager": str(manager), "gui": "ok"}))
     else:
         main()
+
+
+if __name__ == "__main__":
+    entry_point()
