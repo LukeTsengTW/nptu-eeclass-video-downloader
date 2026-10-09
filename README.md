@@ -4,6 +4,14 @@ Windows 圖形介面工具，將你已可觀看的國立屏東大學 eeClass 影
 
 目前版本：**1.7，Windows EXE 版**。本專案提供影片下載，尚未提供格式轉換或重新編碼。
 
+## 操作畫面
+
+| 貼上影片連結 | Firefox 登入／影片載入 |
+| --- | --- |
+| ![貼上 eeClass 影片連結](docs/screenshots/01-paste-video-url.webp) | ![等待 Firefox 登入或影片載入](docs/screenshots/02-firefox-login.webp) |
+| **下載進行中** | **下載完成** |
+| ![下載 MP4 進行中](docs/screenshots/03-downloading.webp) | ![下載完成](docs/screenshots/04-download-complete.webp) |
+
 ## Windows 一般使用者
 
 下載 [v1.7.0 Windows 免安裝版](https://github.com/LukeTsengTW/nptu-eeclass-video-downloader/releases/tag/v1.7.0) 的 `eeClass-v1.7.0-Windows-x64.zip`，解壓縮後雙擊 `eeClass-Downloader.exe`。壓縮包包含 EXE、快速說明、第三方授權與 SHA-256 校驗碼，共 4 個檔案。
